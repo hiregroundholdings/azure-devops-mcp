@@ -24,9 +24,10 @@ variables:
   azureServiceConnection: 'Hire Ground Enterprise'  # Replace with your Azure service connection
 
   # Environment configuration - Update these values based on your deployment
-  environmentName: 'Hire Ground DevOps'  # Replace with your environment name
+  environmentName: 'Production'  # Replace with your environment name
   subscriptionId: '80188524-4199-4293-8e33-7ba33daa0f2a'  # Replace with your Azure subscription ID
   location: 'eastus2'  # Replace with your deployment region
+  azureDevOpsOrgName: 'hireground'  # Replace with your Azure DevOps organization name
 
   # Agent configuration
   vmImageName: 'ubuntu-latest'
@@ -42,7 +43,7 @@ stages:
     displayName: Deploy to Azure Container Apps
     pool:
       vmImage: $(vmImageName)
-    environment: '$(environmentName)'
+    environment: 'Hire Ground DevOps'
     strategy:
       runOnce:
         deploy:
@@ -99,12 +100,8 @@ stages:
 
                 echo "##[section]Deploying infrastructure using Bicep templates"
 
-                # Generate resource token for consistent naming
-                RESOURCE_TOKEN=$(echo "$(environmentName)-$(location)" | tr '[:upper:]' '[:lower:]' | tr -d ' ')
-
                 echo "Resource Group: $(resourceGroupName)"
                 echo "Location: $(location)"
-                echo "Resource Token: $RESOURCE_TOKEN"
                 echo "Environment: $(environmentName)"
 
                 # Create resource group if it doesn't exist
@@ -112,14 +109,13 @@ stages:
                 az group create \
                   --name $(resourceGroupName) \
                   --location $(location) \
-                  --tags environment=$(environmentName) project="azure-devops-mcp"
-
-                # Deploy main Bicep template
+                  --tags environment=$(environmentName) project="azure-devops-mcp"                # Deploy main Bicep template
                 echo "##[command]Deploying Bicep infrastructure..."
-                DEPLOYMENT_OUTPUT=$(az deployment group create \
-                  --resource-group $(resourceGroupName) \
+                DEPLOYMENT_OUTPUT=$(az deployment sub create \
+                  --location $(location) \
                   --template-file "$(Pipeline.Workspace)/infra/main.bicep" \
                   --parameters \
+                    environmentName="$(environmentName)" \
                     location="$(location)" \
                     azureDevOpsOrgName="$(azureDevOpsOrgName)" \
                   --output json)
