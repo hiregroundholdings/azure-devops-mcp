@@ -143,7 +143,7 @@ The container app is configured with:
 - **CPU**: 0.5 cores
 - **Memory**: 1GB
 
-Modify scaling in `infra/resources.bicep`:
+Modify scaling in `.azure/resources.bicep`:
 
 ```bicep
 scale: {
@@ -220,7 +220,7 @@ azd down --purge
 
 ### Custom Domain
 
-To use a custom domain, update `infra/resources.bicep`:
+To use a custom domain, update `.azure/resources.bicep`:
 
 ```bicep
 ingress: {

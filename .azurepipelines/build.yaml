@@ -67,7 +67,7 @@ stages:
     - task: PublishPipelineArtifact@1
       displayName: Publish infrastructure files
       inputs:
-        targetPath: '$(System.DefaultWorkingDirectory)/infra'
+        targetPath: '$(System.DefaultWorkingDirectory)/.azure'
         artifact: 'infra'
         publishLocation: 'pipeline'
 
