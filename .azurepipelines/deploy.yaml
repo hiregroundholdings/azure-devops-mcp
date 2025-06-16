@@ -89,6 +89,58 @@ stages:
                 Write-Host "##vso[task.setvariable variable=buildId]$($metadata.buildId)"
 
           - task: AzureCLI@2
+            displayName: Deploy infrastructure using Bicep
+            inputs:
+              azureSubscription: '$(azureServiceConnection)'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                set -e
+
+                echo "##[section]Deploying infrastructure using Bicep templates"
+
+                # Generate resource token for consistent naming
+                RESOURCE_TOKEN=$(echo "$(environmentName)-$(location)" | tr '[:upper:]' '[:lower:]' | tr -d ' ')
+
+                echo "Resource Group: $(resourceGroupName)"
+                echo "Location: $(location)"
+                echo "Resource Token: $RESOURCE_TOKEN"
+                echo "Environment: $(environmentName)"
+
+                # Create resource group if it doesn't exist
+                echo "##[command]Ensuring resource group exists..."
+                az group create \
+                  --name $(resourceGroupName) \
+                  --location $(location) \
+                  --tags environment=$(environmentName) project="azure-devops-mcp"
+
+                # Deploy main Bicep template
+                echo "##[command]Deploying Bicep infrastructure..."
+                DEPLOYMENT_OUTPUT=$(az deployment group create \
+                  --resource-group $(resourceGroupName) \
+                  --template-file "$(Pipeline.Workspace)/infra/main.bicep" \
+                  --parameters \
+                    location="$(location)" \
+                    azureDevOpsOrgName="$(azureDevOpsOrgName)" \
+                  --output json)
+
+                echo "##[section]Infrastructure deployment completed successfully!"
+
+                # Extract key outputs for later use
+                CONTAINER_APP_NAME=$(echo $DEPLOYMENT_OUTPUT | jq -r '.properties.outputs.containerAppName.value // empty')
+                APP_URL=$(echo $DEPLOYMENT_OUTPUT | jq -r '.properties.outputs.SERVICE_WEB_ENDPOINT_URL.value // empty')
+
+                if [ -n "$CONTAINER_APP_NAME" ]; then
+                  echo "##vso[task.setvariable variable=deployedContainerAppName]$CONTAINER_APP_NAME"
+                  echo "Container App Name: $CONTAINER_APP_NAME"
+                fi
+
+                if [ -n "$APP_URL" ]; then
+                  echo "##vso[task.setvariable variable=deployedAppUrl]$APP_URL"
+                  echo "Application URL: $APP_URL"
+                fi
+
+          - task: AzureCLI@2
             displayName: Deploy container to Azure Container Apps
             inputs:
               azureSubscription: '$(azureServiceConnection)'
