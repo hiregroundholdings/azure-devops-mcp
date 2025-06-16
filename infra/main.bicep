@@ -17,12 +17,9 @@ var tags = {
   'azd-env-name': environmentName
 }
 
-// Generate a unique suffix for all resources
-var resourceToken = toLower(uniqueString(subscription().id, environmentName, location))
-
 // Create the resource group
 resource rg 'Microsoft.Resources/resourceGroups@2024-03-01' = {
-  name: 'rg-${environmentName}'
+  name: 'rg-mcp'
   location: location
   tags: tags
 }
@@ -32,8 +29,6 @@ module resources 'resources.bicep' = {
   scope: rg
   params: {
     location: location
-    environmentName: environmentName
-    resourceToken: resourceToken
     azureDevOpsOrgName: azureDevOpsOrgName
     tags: tags
   }

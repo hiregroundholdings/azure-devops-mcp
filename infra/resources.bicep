@@ -1,25 +1,15 @@
 param location string
-param environmentName string
-param resourceToken string
 param azureDevOpsOrgName string
 param tags object = {}
 
 // Log Analytics workspace
-resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
-  name: 'law-${resourceToken}'
-  location: location
-  tags: tags
-  properties: {
-    sku: {
-      name: 'PerGB2018'
-    }
-    retentionInDays: 30
-  }
+resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2023-09-01' existing = {
+  name: 'log-enterprise-eastus2'
 }
 
 // Application Insights
 resource applicationInsights 'Microsoft.Insights/components@2020-02-02' = {
-  name: 'appi-${resourceToken}'
+  name: 'ado-mcp-server'
   location: location
   tags: tags
   kind: 'web'
@@ -36,7 +26,7 @@ resource containerRegistry 'Microsoft.ContainerRegistry/registries@2023-11-01-pr
 
 // Key Vault
 resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
-  name: 'kv-${resourceToken}'
+  name: 'adomcpvault'
   location: location
   tags: tags
   properties: {
@@ -64,7 +54,7 @@ resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
 
 // User-assigned managed identity
 resource userAssignedIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
-  name: 'mi-${resourceToken}'
+  name: 'id-ado-mcp'
   location: location
   tags: tags
 }
@@ -82,7 +72,7 @@ resource acrPullRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
 
 // Container App Environment
 resource containerAppEnv 'Microsoft.App/managedEnvironments@2024-03-01' = {
-  name: 'cae-${resourceToken}'
+  name: 'cae-devops-eastus2'
   location: location
   tags: tags
   properties: {
@@ -107,7 +97,7 @@ resource registrySecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
 
 // Container App
 resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
-  name: 'ca-${resourceToken}'
+  name: 'ado-mcp-server-eus2'
   location: location
   tags: union(tags, { 'azd-service-name': 'web' })
   identity: {
@@ -141,10 +131,6 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
           name: 'appinsights-connection-string'
           value: applicationInsights.properties.ConnectionString
         }
-        {
-          name: 'azure-devops-org'
-          value: azureDevOpsOrgName
-        }
       ]
     }
     template: {
@@ -171,7 +157,7 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
             }
             {
               name: 'AZURE_ORGANIZATION_NAME'
-              secretRef: 'azure-devops-org'
+              value: azureDevOpsOrgName
             }
             {
               name: 'PORT'
