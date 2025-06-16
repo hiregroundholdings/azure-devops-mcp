@@ -19,12 +19,12 @@ var tags = {
 
 // Create the resource group
 resource rg 'Microsoft.Resources/resourceGroups@2024-03-01' = {
-  name: 'rg-mcp'
+  name: 'rg-devops'
   location: location
   tags: tags
 }
 
-module resources 'resources.bicep' = {
+module resources './resources.bicep' = {
   name: 'resources'
   scope: rg
   params: {

@@ -35,10 +35,8 @@ stages:
 - stage: Deploy
   displayName: Deploy to Azure Container Apps
   variables:
-    # Generate resource names using the same pattern as Bicep
-    resourceToken: ${{ lower(format('{0}-{1}', variables.environmentName, variables.location)) }}
-    resourceGroupName: 'rg-$(environmentName)'
-    containerAppName: 'ca-$(resourceToken)'
+    resourceGroupName: 'rg-devops'
+    containerAppName: 'ado-mcp-server-eus2'
   jobs:
   - deployment: DeployToContainerApps
     displayName: Deploy to Azure Container Apps
