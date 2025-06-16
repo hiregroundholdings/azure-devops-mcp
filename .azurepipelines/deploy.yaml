@@ -59,6 +59,16 @@ stages:
               artifactName: 'deployment-metadata'
               targetPath: '$(Pipeline.Workspace)/metadata'
 
+          - task: DownloadPipelineArtifact@2
+            displayName: Download infrastructure files
+            inputs:
+              buildType: 'specific'
+              project: '$(System.TeamProjectId)'
+              definition: '$(resources.pipeline.ci.pipelineId)'
+              buildVersionToDownload: 'latest'
+              artifactName: 'infra'
+              targetPath: '$(Pipeline.Workspace)/infra'
+
           - task: PowerShell@2
             displayName: Load deployment metadata
             inputs:
