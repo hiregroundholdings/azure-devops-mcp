@@ -6,8 +6,8 @@ trigger: none # No automatic triggers - this is a deployment pipeline
 
 resources:
   pipelines:
-  - pipeline: build
-    source: 'Azure DevOps MCP Server - Build' # Replace with your build pipeline name
+  - pipeline: ci
+    source: 'ado-mcp-ci'
     trigger:
       branches:
         include:
@@ -50,7 +50,7 @@ stages:
             inputs:
               buildType: 'specific'
               project: '$(System.TeamProjectId)'
-              definition: '$(resources.pipeline.build.pipelineId)'
+              definition: '$(resources.pipeline.ci.pipelineId)'
               buildVersionToDownload: 'latest'
               artifactName: 'deployment-metadata'
               targetPath: '$(Pipeline.Workspace)/metadata'
@@ -175,7 +175,7 @@ stages:
       inputs:
         buildType: 'specific'
         project: '$(System.TeamProjectId)'
-        definition: '$(resources.pipeline.build.pipelineId)'
+        definition: '$(resources.pipeline.ci.pipelineId)'
         buildVersionToDownload: 'latest'
         artifactName: 'deployment-metadata'
         targetPath: '$(Pipeline.Workspace)/metadata'
