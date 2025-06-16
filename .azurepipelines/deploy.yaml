@@ -102,15 +102,24 @@ stages:
 
                 echo "Resource Group: $(resourceGroupName)"
                 echo "Location: $(location)"
-                echo "Environment: $(environmentName)"
-
-                # Create resource group if it doesn't exist
+                echo "Environment: $(environmentName)"                # Create resource group if it doesn't exist
                 echo "##[command]Ensuring resource group exists..."
                 az group create \
                   --name $(resourceGroupName) \
                   --location $(location) \
                   --tags environment=$(environmentName) project="azure-devops-mcp"                # Deploy main Bicep template
                 echo "##[command]Deploying Bicep infrastructure..."
+
+                # Check if the Bicep file exists
+                if [ ! -f "$(Pipeline.Workspace)/infra/main.bicep" ]; then
+                  echo "##[error]Bicep file not found at $(Pipeline.Workspace)/infra/main.bicep"
+                  echo "Available files in infra directory:"
+                  ls -la "$(Pipeline.Workspace)/infra/" || echo "Infra directory not found"
+                  exit 1
+                fi
+
+                # Execute the deployment with better error handling
+                echo "##[command]Executing Bicep deployment..."
                 DEPLOYMENT_OUTPUT=$(az deployment sub create \
                   --location $(location) \
                   --template-file "$(Pipeline.Workspace)/infra/main.bicep" \
@@ -118,23 +127,34 @@ stages:
                     environmentName="$(environmentName)" \
                     location="$(location)" \
                     azureDevOpsOrgName="$(azureDevOpsOrgName)" \
-                  --output json)
+                  --output json 2>&1)
+
+                DEPLOYMENT_EXIT_CODE=$?
+
+                if [ $DEPLOYMENT_EXIT_CODE -ne 0 ]; then
+                  echo "##[error]Bicep deployment failed with exit code: $DEPLOYMENT_EXIT_CODE"
+                  echo "##[error]Deployment output: $DEPLOYMENT_OUTPUT"
+                  exit $DEPLOYMENT_EXIT_CODE
+                fi
 
                 echo "##[section]Infrastructure deployment completed successfully!"
 
                 # Extract key outputs for later use
-                CONTAINER_APP_NAME=$(echo $DEPLOYMENT_OUTPUT | jq -r '.properties.outputs.containerAppName.value // empty')
                 APP_URL=$(echo $DEPLOYMENT_OUTPUT | jq -r '.properties.outputs.SERVICE_WEB_ENDPOINT_URL.value // empty')
-
-                if [ -n "$CONTAINER_APP_NAME" ]; then
-                  echo "##vso[task.setvariable variable=deployedContainerAppName]$CONTAINER_APP_NAME"
-                  echo "Container App Name: $CONTAINER_APP_NAME"
-                fi
 
                 if [ -n "$APP_URL" ]; then
                   echo "##vso[task.setvariable variable=deployedAppUrl]$APP_URL"
                   echo "Application URL: $APP_URL"
+                else
+                  echo "##[warning]Could not extract application URL from deployment output"
                 fi
+
+                # Also extract other useful outputs
+                REGISTRY_ENDPOINT=$(echo $DEPLOYMENT_OUTPUT | jq -r '.properties.outputs.AZURE_CONTAINER_REGISTRY_ENDPOINT.value // empty')
+                KEY_VAULT_ENDPOINT=$(echo $DEPLOYMENT_OUTPUT | jq -r '.properties.outputs.AZURE_KEY_VAULT_ENDPOINT.value // empty')
+
+                echo "Registry Endpoint: $REGISTRY_ENDPOINT"
+                echo "Key Vault Endpoint: $KEY_VAULT_ENDPOINT"
 
           - task: AzureCLI@2
             displayName: Deploy container to Azure Container Apps
