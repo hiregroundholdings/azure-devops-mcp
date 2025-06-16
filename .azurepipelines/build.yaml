@@ -1,0 +1,92 @@
+# Azure DevOps CI Pipeline for Azure DevOps MCP Server
+# Build Docker image and push to ACR
+# https://docs.microsoft.com/azure/devops/pipelines/languages/docker
+
+trigger:
+- main
+
+resources:
+- repo: self
+
+variables:
+  # Container registry configuration
+  dockerRegistryServiceConnection: '388d79ab-b089-4803-8d92-1422f8cb61a5'
+  imageRepository: 'adomcp'
+  containerRegistry: 'hireground.azurecr.io'
+  dockerfilePath: '**/Dockerfile'
+  tag: '$(Build.BuildId)'
+
+  # Agent configuration
+  vmImageName: 'ubuntu-latest'
+
+stages:
+- stage: Build
+  displayName: Build and push Docker image
+  jobs:
+  - job: Build
+    displayName: Build
+    pool:
+      vmImage: $(vmImageName)
+    steps:
+    - task: Docker@2
+      displayName: Build and push Docker image to ACR
+      inputs:
+        command: buildAndPush
+        repository: $(imageRepository)
+        dockerfile: $(dockerfilePath)
+        containerRegistry: $(dockerRegistryServiceConnection)
+        tags: |
+          $(tag)
+          latest
+
+    - task: PublishPipelineArtifact@1
+      displayName: Publish build artifact
+      inputs:
+        targetPath: '$(System.DefaultWorkingDirectory)'
+        artifact: 'source'
+        publishLocation: 'pipeline'
+
+- stage: PublishArtifacts
+  displayName: Publish deployment artifacts
+  dependsOn: Build
+  condition: succeeded()
+  jobs:
+  - job: PublishArtifacts
+    displayName: Publish artifacts for deployment
+    pool:
+      vmImage: $(vmImageName)
+    steps:
+    - checkout: self
+
+    - task: PublishPipelineArtifact@1
+      displayName: Publish infrastructure files
+      inputs:
+        targetPath: '$(System.DefaultWorkingDirectory)/infra'
+        artifact: 'infra'
+        publishLocation: 'pipeline'
+
+    - task: PowerShell@2
+      displayName: Create deployment metadata
+      inputs:
+        targetType: 'inline'
+        script: |
+          $metadata = @{
+            buildId = "$(Build.BuildId)"
+            sourceVersion = "$(Build.SourceVersion)"
+            imageTag = "$(tag)"
+            imageRepository = "$(imageRepository)"
+            containerRegistry = "$(containerRegistry)"
+            timestamp = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ssZ")
+          }
+
+          $metadata | ConvertTo-Json | Out-File -FilePath "$(System.DefaultWorkingDirectory)/deployment-metadata.json"
+
+          Write-Host "##[section]Build Metadata Created:"
+          Get-Content "$(System.DefaultWorkingDirectory)/deployment-metadata.json"
+
+    - task: PublishPipelineArtifact@1
+      displayName: Publish deployment metadata
+      inputs:
+        targetPath: '$(System.DefaultWorkingDirectory)/deployment-metadata.json'
+        artifact: 'deployment-metadata'
+        publishLocation: 'pipeline'

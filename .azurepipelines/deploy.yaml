@@ -1,22 +1,19 @@
-# Azure DevOps Combined Pipeline for Azure DevOps MCP Server
-# Build Docker image, push to ACR, and deploy to Azure Container Apps
-# NOTE: For separate CI/CD pipelines, use build.yaml and deploy.yaml instead
-# https://docs.microsoft.com/azure/devops/pipelines/languages/docker
+# Azure DevOps CD Pipeline for Azure DevOps MCP Server
+# Deploy to Azure Container Apps
+# This pipeline is triggered manually or by completion of the build pipeline
 
-trigger:
-- main
+trigger: none # No automatic triggers - this is a deployment pipeline
 
 resources:
-- repo: self
+  pipelines:
+  - pipeline: build
+    source: 'Azure DevOps MCP Server - Build' # Replace with your build pipeline name
+    trigger:
+      branches:
+        include:
+        - main
 
 variables:
-  # Container registry configuration
-  dockerRegistryServiceConnection: '388d79ab-b089-4803-8d92-1422f8cb61a5'
-  imageRepository: 'adomcp'
-  containerRegistry: 'hireground.azurecr.io'
-  dockerfilePath: '**/Dockerfile'
-  tag: '$(Build.BuildId)'
-
   # Azure service connection for deployment
   azureServiceConnection: 'Hire Ground Enterprise'  # Replace with your Azure service connection
 
@@ -29,35 +26,13 @@ variables:
   vmImageName: 'ubuntu-latest'
 
 stages:
-- stage: Build
-  displayName: Build and push Docker image
-  jobs:
-  - job: Build
-    displayName: Build
-    pool:
-      vmImage: $(vmImageName)
-    steps:
-    - task: Docker@2
-      displayName: Build and push Docker image to ACR
-      inputs:
-        command: buildAndPush
-        repository: $(imageRepository)
-        dockerfile: $(dockerfilePath)
-        containerRegistry: $(dockerRegistryServiceConnection)
-        tags: |
-          $(tag)
-          latest
-
 - stage: Deploy
   displayName: Deploy to Azure Container Apps
-  dependsOn: Build
-  condition: succeeded()
   variables:
     # Generate resource names using the same pattern as Bicep
     resourceToken: ${{ lower(format('{0}-{1}', variables.environmentName, variables.location)) }}
     resourceGroupName: 'rg-$(environmentName)'
     containerAppName: 'ca-$(resourceToken)'
-    newImageTag: '$(containerRegistry)/$(imageRepository):$(tag)'
   jobs:
   - deployment: DeployToContainerApps
     displayName: Deploy to Azure Container Apps
@@ -69,6 +44,35 @@ stages:
         deploy:
           steps:
           - checkout: none
+
+          - task: DownloadPipelineArtifact@2
+            displayName: Download deployment metadata
+            inputs:
+              buildType: 'specific'
+              project: '$(System.TeamProjectId)'
+              definition: '$(resources.pipeline.build.pipelineId)'
+              buildVersionToDownload: 'latest'
+              artifactName: 'deployment-metadata'
+              targetPath: '$(Pipeline.Workspace)/metadata'
+
+          - task: PowerShell@2
+            displayName: Load deployment metadata
+            inputs:
+              targetType: 'inline'
+              script: |
+                $metadata = Get-Content "$(Pipeline.Workspace)/metadata/deployment-metadata.json" | ConvertFrom-Json
+
+                Write-Host "##[section]Deployment Metadata:"
+                Write-Host "Build ID: $($metadata.buildId)"
+                Write-Host "Source Version: $($metadata.sourceVersion)"
+                Write-Host "Image Tag: $($metadata.imageTag)"
+                Write-Host "Container Registry: $($metadata.containerRegistry)"
+                Write-Host "Image Repository: $($metadata.imageRepository)"
+                Write-Host "Build Timestamp: $($metadata.timestamp)"
+
+                # Set variables for use in subsequent tasks
+                Write-Host "##vso[task.setvariable variable=newImageTag]$($metadata.containerRegistry)/$($metadata.imageRepository):$($metadata.imageTag)"
+                Write-Host "##vso[task.setvariable variable=buildId]$($metadata.buildId)"
 
           - task: AzureCLI@2
             displayName: Deploy container to Azure Container Apps
@@ -166,16 +170,31 @@ stages:
     pool:
       vmImage: $(vmImageName)
     steps:
+    - task: DownloadPipelineArtifact@2
+      displayName: Download deployment metadata
+      inputs:
+        buildType: 'specific'
+        project: '$(System.TeamProjectId)'
+        definition: '$(resources.pipeline.build.pipelineId)'
+        buildVersionToDownload: 'latest'
+        artifactName: 'deployment-metadata'
+        targetPath: '$(Pipeline.Workspace)/metadata'
+
     - task: PowerShell@2
       displayName: Send deployment notification
       inputs:
         targetType: 'inline'
         script: |
+          $metadata = Get-Content "$(Pipeline.Workspace)/metadata/deployment-metadata.json" | ConvertFrom-Json
+
           Write-Host "##[section]🎉 Azure DevOps MCP Server Deployment Summary"
           Write-Host "##[command]Environment: $(environmentName)"
-          Write-Host "##[command]Image Tag: $(tag)"
-          Write-Host "##[command]Container Registry: $(containerRegistry)"
-          Write-Host "##[command]Resource Group: rg-$(environmentName)"
+          Write-Host "##[command]Build ID: $($metadata.buildId)"
+          Write-Host "##[command]Image Tag: $($metadata.imageTag)"
+          Write-Host "##[command]Container Registry: $($metadata.containerRegistry)"
+          Write-Host "##[command]Resource Group: $(resourceGroupName)"
+          Write-Host "##[command]Source Version: $($metadata.sourceVersion)"
+          Write-Host "##[command]Build Timestamp: $($metadata.timestamp)"
           Write-Host ""
           Write-Host "##[section]✅ Deployment completed successfully!"
           Write-Host "##[command]The Azure DevOps MCP Server is now running in Azure Container Apps"
