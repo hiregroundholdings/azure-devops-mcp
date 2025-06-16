@@ -1,8 +1,14 @@
 # Azure DevOps CD Pipeline for Azure DevOps MCP Server
 # Deploy to Azure Container Apps
-# This pipeline is triggered manually or by completion of the build pipeline
+# This pipeline is triggered manually, by updates to the deployment pipeline or by completion of the build pipeline
 
-trigger: none # No automatic triggers - this is a deployment pipeline
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - .azurepipelines/deploy.yaml
 
 resources:
   pipelines:
