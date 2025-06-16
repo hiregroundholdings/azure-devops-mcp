@@ -18,7 +18,7 @@ variables:
   azureServiceConnection: 'Hire Ground Enterprise'  # Replace with your Azure service connection
 
   # Environment configuration - Update these values based on your deployment
-  environmentName: 'prod'  # Replace with your environment name
+  environmentName: 'Hire Ground DevOps'  # Replace with your environment name
   subscriptionId: '80188524-4199-4293-8e33-7ba33daa0f2a'  # Replace with your Azure subscription ID
   location: 'eastus2'  # Replace with your deployment region
 
