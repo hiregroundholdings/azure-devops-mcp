@@ -1,0 +1,180 @@
+# Azure DevOps Pipeline for Azure DevOps MCP Server
+# Build Docker image, push to ACR, and deploy to Azure Container Apps
+# https://docs.microsoft.com/azure/devops/pipelines/languages/docker
+
+trigger:
+- main
+
+resources:
+- repo: self
+
+variables:
+  # Container registry configuration
+  dockerRegistryServiceConnection: '388d79ab-b089-4803-8d92-1422f8cb61a5'
+  imageRepository: 'adomcp'
+  containerRegistry: 'hireground.azurecr.io'
+  dockerfilePath: '**/Dockerfile'
+  tag: '$(Build.BuildId)'
+
+  # Azure service connection for deployment
+  azureServiceConnection: 'Hire Ground Enterprise'  # Replace with your Azure service connection
+
+  # Environment configuration - Update these values based on your deployment
+  environmentName: 'prod'  # Replace with your environment name
+  subscriptionId: '80188524-4199-4293-8e33-7ba33daa0f2a'  # Replace with your Azure subscription ID
+  location: 'eastus2'  # Replace with your deployment region
+
+  # Agent configuration
+  vmImageName: 'ubuntu-latest'
+
+stages:
+- stage: Build
+  displayName: Build and push Docker image
+  jobs:
+  - job: Build
+    displayName: Build
+    pool:
+      vmImage: $(vmImageName)
+    steps:
+    - task: Docker@2
+      displayName: Build and push Docker image to ACR
+      inputs:
+        command: buildAndPush
+        repository: $(imageRepository)
+        dockerfile: $(dockerfilePath)
+        containerRegistry: $(dockerRegistryServiceConnection)
+        tags: |
+          $(tag)
+          latest
+
+- stage: Deploy
+  displayName: Deploy to Azure Container Apps
+  dependsOn: Build
+  condition: succeeded()
+  variables:
+    # Generate resource names using the same pattern as Bicep
+    resourceToken: ${{ lower(format('{0}-{1}', variables.environmentName, variables.location)) }}
+    resourceGroupName: 'rg-$(environmentName)'
+    containerAppName: 'ca-$(resourceToken)'
+    newImageTag: '$(containerRegistry)/$(imageRepository):$(tag)'
+  jobs:
+  - deployment: DeployToContainerApps
+    displayName: Deploy to Azure Container Apps
+    pool:
+      vmImage: $(vmImageName)
+    environment: '$(environmentName)'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - checkout: none
+
+          - task: AzureCLI@2
+            displayName: Deploy container to Azure Container Apps
+            inputs:
+              azureSubscription: '$(azureServiceConnection)'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                set -e
+
+                echo "##[section]Starting deployment to Azure Container Apps"
+                echo "Resource Group: $(resourceGroupName)"
+                echo "Container App: $(containerAppName)"
+                echo "New Image: $(newImageTag)"
+
+                # Check if container app exists
+                if az containerapp show --name $(containerAppName) --resource-group $(resourceGroupName) --output none 2>/dev/null; then
+                  echo "##[command]Container App exists, updating with new image..."
+
+                  # Update existing container app
+                  az containerapp update \
+                    --name $(containerAppName) \
+                    --resource-group $(resourceGroupName) \
+                    --image $(newImageTag) \
+                    --output table
+
+                  echo "##[section]Container App updated successfully!"
+                else
+                  echo "##[warning]Container App $(containerAppName) not found in resource group $(resourceGroupName)"
+                  echo "Please ensure the infrastructure is deployed first using 'azd up' or Bicep templates"
+                  exit 1
+                fi
+
+                # Wait for deployment to complete
+                echo "##[command]Waiting for deployment to complete..."
+                sleep 30
+
+                # Get the application URL
+                FQDN=$(az containerapp show \
+                  --name $(containerAppName) \
+                  --resource-group $(resourceGroupName) \
+                  --query "properties.configuration.ingress.fqdn" \
+                  --output tsv)
+
+                if [ -n "$FQDN" ]; then
+                  echo "##[section]✅ Deployment completed successfully!"
+                  echo "##[command]🚀 Application URL: https://$FQDN"
+                  echo "##vso[task.setvariable variable=APP_URL;isOutput=true]https://$FQDN"
+                else
+                  echo "##[error]Failed to retrieve application URL"
+                  exit 1
+                fi
+
+          - task: AzureCLI@2
+            displayName: Verify deployment health
+            inputs:
+              azureSubscription: '$(azureServiceConnection)'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                echo "##[section]Verifying deployment health..."
+
+                # Get container app status
+                STATUS=$(az containerapp show \
+                  --name $(containerAppName) \
+                  --resource-group $(resourceGroupName) \
+                  --query "properties.provisioningState" \
+                  --output tsv)
+
+                echo "Container App provisioning state: $STATUS"
+
+                if [ "$STATUS" = "Succeeded" ]; then
+                  echo "##[section]✅ Container App is healthy and running!"
+
+                  # Get replica status
+                  REPLICAS=$(az containerapp replica list \
+                    --name $(containerAppName) \
+                    --resource-group $(resourceGroupName) \
+                    --query "length(@)" \
+                    --output tsv)
+
+                  echo "Active replicas: $REPLICAS"
+                else
+                  echo "##[warning]Container App status: $STATUS"
+                  echo "Check the Azure portal for more details"
+                fi
+
+- stage: PostDeployment
+  displayName: Post-deployment tasks
+  dependsOn: Deploy
+  condition: succeeded()
+  jobs:
+  - job: NotifySuccess
+    displayName: Deployment notification
+    pool:
+      vmImage: $(vmImageName)
+    steps:
+    - task: PowerShell@2
+      displayName: Send deployment notification
+      inputs:
+        targetType: 'inline'
+        script: |
+          Write-Host "##[section]🎉 Azure DevOps MCP Server Deployment Summary"
+          Write-Host "##[command]Environment: $(environmentName)"
+          Write-Host "##[command]Image Tag: $(tag)"
+          Write-Host "##[command]Container Registry: $(containerRegistry)"
+          Write-Host "##[command]Resource Group: rg-$(environmentName)"
+          Write-Host ""
+          Write-Host "##[section]✅ Deployment completed successfully!"
+          Write-Host "##[command]The Azure DevOps MCP Server is now running in Azure Container Apps"

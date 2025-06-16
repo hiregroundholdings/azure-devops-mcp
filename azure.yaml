@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Azure/azure-dev/main/schemas/v1.0/azure.yaml.json
+
+name: azure-devops-mcp
+metadata:
+  template: azure-devops-mcp@0.0.1-beta
+
+infra:
+  provider: bicep
+
+services:
+  web:
+    project: .
+    language: ts
+    host: containerapp
+    hooks:
+      prepackage:
+        shell: sh
+        run: |
+          npm run build
+        continueOnError: false
+        interactive: false
