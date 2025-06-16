@@ -30,16 +30,8 @@ resource applicationInsights 'Microsoft.Insights/components@2020-02-02' = {
 }
 
 // Container Registry
-resource containerRegistry 'Microsoft.ContainerRegistry/registries@2023-11-01-preview' = {
-  name: 'cr${resourceToken}'
-  location: location
-  tags: tags
-  sku: {
-    name: 'Basic'
-  }
-  properties: {
-    adminUserEnabled: true
-  }
+resource containerRegistry 'Microsoft.ContainerRegistry/registries@2023-11-01-preview' existing = {
+  name: 'hireground'
 }
 
 // Key Vault
