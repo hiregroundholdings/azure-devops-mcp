@@ -12,6 +12,11 @@ trigger:
       - .azure/**
 
 resources:
+  repositories:
+  - repository: armtemplates
+    type: git
+    name: arm-templates
+
   pipelines:
   - pipeline: ci
     source: 'ado-mcp-ci'
@@ -127,38 +132,12 @@ stages:
                 -location "$(location)"
                 -azureDevOpsOrgName "$(azureDevOpsOrgName)"
               deploymentMode: 'Incremental'
-              deploymentOutputs: 'armOutputs'
+              deploymentOutputs: 'armOutputsJson'
 
-          - task: PowerShell@2
-            displayName: Parse deployment outputs
-            inputs:
-              targetType: 'inline'
-              script: |
-                Write-Host "##[section]Processing deployment outputs..."
-
-                # Parse the ARM outputs JSON
-                $outputs = '$(armOutputs)' | ConvertFrom-Json
-
-                Write-Host "Raw ARM Outputs: $(armOutputs)"
-
-                # Extract key values
-                if ($outputs.PSObject.Properties['SERVICE_WEB_ENDPOINT_URL']) {
-                  $appUrl = $outputs.SERVICE_WEB_ENDPOINT_URL.value
-                  Write-Host "##vso[task.setvariable variable=deployedAppUrl]$appUrl"
-                  Write-Host "Application URL: $appUrl"
-                }
-
-                if ($outputs.PSObject.Properties['AZURE_CONTAINER_REGISTRY_ENDPOINT']) {
-                  $registryEndpoint = $outputs.AZURE_CONTAINER_REGISTRY_ENDPOINT.value
-                  Write-Host "Registry Endpoint: $registryEndpoint"
-                }
-
-                if ($outputs.PSObject.Properties['AZURE_KEY_VAULT_ENDPOINT']) {
-                  $keyVaultEndpoint = $outputs.AZURE_KEY_VAULT_ENDPOINT.value
-                  Write-Host "Key Vault Endpoint: $keyVaultEndpoint"
-                }
-
-                Write-Host "##[section]Infrastructure deployment completed successfully!"
+          - template: yaml/ParseArmDeploymentOutputs.yaml@armtemplates
+            parameters:
+              deploymentOutputs: $(armOutputsJson)
+              name: parseArmJsonOutput
 
           - task: AzureCLI@2
             displayName: Deploy container to Azure Container Apps
@@ -189,7 +168,8 @@ stages:
                       --image $(newImageTag) \
                       --output table
 
-                    echo "##[section]Container App updated successfully!"                  else
+                    echo "##[section]Container App updated successfully!"
+                  else
                     echo "##[section]Infrastructure-only deployment - Container App image not changed"
                     echo "##[command]Container App exists and infrastructure is up to date"
                   fi
