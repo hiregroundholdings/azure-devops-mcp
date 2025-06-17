@@ -58,13 +58,16 @@ resource userAssignedIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@
 }
 
 // Role assignment for ACR Pull
-resource acrPullRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(containerRegistry.id, userAssignedIdentity.id, 'acrpull')
-  scope: containerRegistry
-  properties: {
+module acrPullRole 'br/hireground:resource-role-assignment:2024-06-04' = {
+  scope: subscription()
+  name: 'acr-pull-role'
+  params: {
     principalId: userAssignedIdentity.properties.principalId
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d') // AcrPull
     principalType: 'ServicePrincipal'
+    resourceId: containerRegistry.id
+    roles: [
+      'AcrPull'
+    ]
   }
 }
 
@@ -92,7 +95,7 @@ resource registrySecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
     value: containerRegistry.listCredentials().passwords[0].value
   }
   dependsOn: [
-    keyVaultSecretsOfficerRole
+    keyVaultRoles
   ]
 }
 
@@ -182,29 +185,22 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
     }  }
   dependsOn: [
     acrPullRole
-    keyVaultSecretsUserRole
+    keyVaultRoles
   ]
 }
 
 // Key Vault RBAC role assignments
-// Grant the managed identity Key Vault Secrets User role for reading secrets
-resource keyVaultSecretsUserRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(keyVault.id, userAssignedIdentity.id, 'keyvaultsecretsuser')
-  scope: keyVault
-  properties: {
+// Grant the managed identity Key Vault Secrets User and Key Vault Secrets Officer roles for reading and managing secrets
+module keyVaultRoles 'br/hireground:resource-role-assignment:2024-06-04' = {
+  scope: subscription()
+  name: 'key-vault-user-roles'
+  params: {
+    resourceId: keyVault.id
     principalId: userAssignedIdentity.properties.principalId
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6') // Key Vault Secrets User
-    principalType: 'ServicePrincipal'
-  }
-}
-
-// Grant the managed identity Key Vault Secrets Officer role for managing secrets (needed for container registry secret)
-resource keyVaultSecretsOfficerRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(keyVault.id, userAssignedIdentity.id, 'keyvaultsecretsofficer')
-  scope: keyVault
-  properties: {
-    principalId: userAssignedIdentity.properties.principalId
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b86a8fe4-44ce-4948-aee5-eccb2c155cd7') // Key Vault Secrets Officer
+    roles: [
+      'Key Vault Secrets User'
+      'Key Vault Secrets Officer'
+    ]
     principalType: 'ServicePrincipal'
   }
 }

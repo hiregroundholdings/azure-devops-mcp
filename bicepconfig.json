@@ -1,0 +1,23 @@
+{
+  "analyzers": {
+    "core": {
+      "rules": {
+        "no-unused-params": {
+          "level": "warning"
+        },
+        "simplify-json-null": {
+          "level": "warning"
+        }
+      }
+    }
+  },
+  "moduleAliases": {
+    "ts": {},
+    "br": {
+      "hireground": {
+        "modulePath": "bicep/modules",
+        "registry": "hireground.azurecr.io"
+      }
+    }
+  }
+}
