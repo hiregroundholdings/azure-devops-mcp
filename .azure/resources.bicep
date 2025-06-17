@@ -4,7 +4,14 @@ param tags object = {}
 
 // Log Analytics workspace
 resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2023-09-01' existing = {
+  scope: resourceGroup('80188524-4199-4293-8e33-7ba33daa0f2a', 'rg-logs')
   name: 'log-enterprise-eastus2'
+}
+
+// Container Registry
+resource containerRegistry 'Microsoft.ContainerRegistry/registries@2023-11-01-preview' existing = {
+  scope: resourceGroup('80188524-4199-4293-8e33-7ba33daa0f2a', 'containers-core')
+  name: 'hireground'
 }
 
 // Application Insights
@@ -17,11 +24,6 @@ resource applicationInsights 'Microsoft.Insights/components@2020-02-02' = {
     Application_Type: 'web'
     WorkspaceResourceId: logAnalytics.id
   }
-}
-
-// Container Registry
-resource containerRegistry 'Microsoft.ContainerRegistry/registries@2023-11-01-preview' existing = {
-  name: 'hireground'
 }
 
 // Key Vault
