@@ -18,7 +18,7 @@ resources:
 variables:
   # Container registry configuration
   dockerRegistryServiceConnection: '388d79ab-b089-4803-8d92-1422f8cb61a5'
-  imageRepository: 'adomcp'
+  imageRepository: 'azure-devops-mcp'
   containerRegistry: 'hireground.azurecr.io'
   dockerfilePath: '**/Dockerfile'
   tag: '$(Build.BuildId)'
