@@ -89,72 +89,52 @@ stages:
                 Write-Host "##vso[task.setvariable variable=newImageTag]$($metadata.containerRegistry)/$($metadata.imageRepository):$($metadata.imageTag)"
                 Write-Host "##vso[task.setvariable variable=buildId]$($metadata.buildId)"
 
-          - task: AzureCLI@2
+          - task: AzureResourceManagerTemplateDeployment@3
             displayName: Deploy infrastructure using Bicep
             inputs:
-              azureSubscription: '$(azureServiceConnection)'
-              scriptType: 'bash'
-              scriptLocation: 'inlineScript'
-              inlineScript: |
-                set -e
+              deploymentScope: 'Subscription'
+              azureResourceManagerConnection: '$(azureServiceConnection)'
+              subscriptionId: '$(subscriptionId)'
+              location: '$(location)'
+              templateLocation: 'Linked artifact'
+              csmFile: '$(Pipeline.Workspace)/infra/main.bicep'
+              overrideParameters: |
+                -environmentName "$(environmentName)"
+                -location "$(location)"
+                -azureDevOpsOrgName "$(azureDevOpsOrgName)"
+              deploymentMode: 'Incremental'
+              deploymentOutputs: 'armOutputs'
 
-                echo "##[section]Deploying infrastructure using Bicep templates"
+          - task: PowerShell@2
+            displayName: Parse deployment outputs
+            inputs:
+              targetType: 'inline'
+              script: |
+                Write-Host "##[section]Processing deployment outputs..."
 
-                echo "Resource Group: $(resourceGroupName)"
-                echo "Location: $(location)"
-                echo "Environment: $(environmentName)"                # Create resource group if it doesn't exist
-                echo "##[command]Ensuring resource group exists..."
-                az group create \
-                  --name $(resourceGroupName) \
-                  --location $(location) \
-                  --tags environment=$(environmentName) project="azure-devops-mcp"                # Deploy main Bicep template
-                echo "##[command]Deploying Bicep infrastructure..."
+                # Parse the ARM outputs JSON
+                $outputs = '$(armOutputs)' | ConvertFrom-Json
 
-                # Check if the Bicep file exists
-                if [ ! -f "$(Pipeline.Workspace)/infra/main.bicep" ]; then
-                  echo "##[error]Bicep file not found at $(Pipeline.Workspace)/infra/main.bicep"
-                  echo "Available files in infra directory:"
-                  ls -la "$(Pipeline.Workspace)/infra/" || echo "Infra directory not found"
-                  exit 1
-                fi
+                Write-Host "Raw ARM Outputs: $(armOutputs)"
 
-                # Execute the deployment with better error handling
-                echo "##[command]Executing Bicep deployment..."
-                DEPLOYMENT_OUTPUT=$(az deployment sub create \
-                  --location $(location) \
-                  --template-file "$(Pipeline.Workspace)/infra/main.bicep" \
-                  --parameters \
-                    environmentName="$(environmentName)" \
-                    location="$(location)" \
-                    azureDevOpsOrgName="$(azureDevOpsOrgName)" \
-                  --output json 2>&1)
+                # Extract key values
+                if ($outputs.PSObject.Properties['SERVICE_WEB_ENDPOINT_URL']) {
+                  $appUrl = $outputs.SERVICE_WEB_ENDPOINT_URL.value
+                  Write-Host "##vso[task.setvariable variable=deployedAppUrl]$appUrl"
+                  Write-Host "Application URL: $appUrl"
+                }
 
-                DEPLOYMENT_EXIT_CODE=$?
+                if ($outputs.PSObject.Properties['AZURE_CONTAINER_REGISTRY_ENDPOINT']) {
+                  $registryEndpoint = $outputs.AZURE_CONTAINER_REGISTRY_ENDPOINT.value
+                  Write-Host "Registry Endpoint: $registryEndpoint"
+                }
 
-                if [ $DEPLOYMENT_EXIT_CODE -ne 0 ]; then
-                  echo "##[error]Bicep deployment failed with exit code: $DEPLOYMENT_EXIT_CODE"
-                  echo "##[error]Deployment output: $DEPLOYMENT_OUTPUT"
-                  exit $DEPLOYMENT_EXIT_CODE
-                fi
+                if ($outputs.PSObject.Properties['AZURE_KEY_VAULT_ENDPOINT']) {
+                  $keyVaultEndpoint = $outputs.AZURE_KEY_VAULT_ENDPOINT.value
+                  Write-Host "Key Vault Endpoint: $keyVaultEndpoint"
+                }
 
-                echo "##[section]Infrastructure deployment completed successfully!"
-
-                # Extract key outputs for later use
-                APP_URL=$(echo $DEPLOYMENT_OUTPUT | jq -r '.properties.outputs.SERVICE_WEB_ENDPOINT_URL.value // empty')
-
-                if [ -n "$APP_URL" ]; then
-                  echo "##vso[task.setvariable variable=deployedAppUrl]$APP_URL"
-                  echo "Application URL: $APP_URL"
-                else
-                  echo "##[warning]Could not extract application URL from deployment output"
-                fi
-
-                # Also extract other useful outputs
-                REGISTRY_ENDPOINT=$(echo $DEPLOYMENT_OUTPUT | jq -r '.properties.outputs.AZURE_CONTAINER_REGISTRY_ENDPOINT.value // empty')
-                KEY_VAULT_ENDPOINT=$(echo $DEPLOYMENT_OUTPUT | jq -r '.properties.outputs.AZURE_KEY_VAULT_ENDPOINT.value // empty')
-
-                echo "Registry Endpoint: $REGISTRY_ENDPOINT"
-                echo "Key Vault Endpoint: $KEY_VAULT_ENDPOINT"
+                Write-Host "##[section]Infrastructure deployment completed successfully!"
 
           - task: AzureCLI@2
             displayName: Deploy container to Azure Container Apps
