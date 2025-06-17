@@ -4,27 +4,54 @@ This directory contains Azure DevOps pipeline definitions for the Azure DevOps M
 
 ## Pipeline Files
 
-### CI/CD Approach Options
-
-You can choose between two approaches for your CI/CD pipelines:
-
-#### Option 1: Separate CI and CD Pipelines (Recommended)
+### CI/CD Approach: Separate CI and CD Pipelines ✅
 
 - **`build.yaml`** - Continuous Integration (CI) pipeline
-  - Triggers on commits to main branch
+  - Triggers on commits to main branch (excludes `.azure/**` and deployment pipeline changes)
   - Builds and pushes Docker image to Azure Container Registry
-  - Publishes deployment artifacts and metadata
+  - Publishes deployment metadata for consumption by CD pipeline
 
 - **`deploy.yaml`** - Continuous Deployment (CD) pipeline
-  - Triggered by completion of the build pipeline
-  - Deploys the built container to Azure Container Apps
+  - Triggered by:
+    - Completion of the build pipeline (automatic container deployment)
+    - Changes to `.azure/**` (infrastructure-only deployment)
+    - Changes to the deployment pipeline itself
+  - Deploys infrastructure using Bicep templates (from repository, not artifacts)
+  - Conditionally updates container app (only when new build is available)
   - Performs health checks and notifications
 
-#### Option 2: Combined Pipeline
-
-- **`release.yaml`** - Combined build and deployment pipeline
+- **`release.yaml`** - Combined build and deployment pipeline (legacy)
   - Single pipeline that handles both build and deployment
-  - Simpler setup but less flexible
+  - Kept for reference/fallback scenarios
+
+## Key Features
+
+### 🎯 **Smart Triggering**
+- **Code changes** → Triggers build pipeline → Automatically triggers deployment
+- **Infrastructure changes** → Triggers deployment pipeline only (no unnecessary builds)
+- **Deployment pipeline changes** → Triggers deployment pipeline for self-validation
+
+### 🔄 **Flexible Deployment Modes**
+
+#### 1. **Full Deployment** (Build + Deploy)
+When the build pipeline completes:
+- Downloads build metadata with new image information
+- Deploys infrastructure using latest Bicep templates
+- Updates container app with newly built image
+- Performs health verification
+
+#### 2. **Infrastructure-Only Deployment**
+When only infrastructure changes:
+- Uses latest available container image from registry
+- Deploys infrastructure updates using Bicep templates
+- Skips container app image update (no new build)
+- Performs health verification
+
+### 🏗️ **Infrastructure Management**
+- Infrastructure files (`.azure/**`) are sourced directly from the repository
+- No infrastructure artifacts are published by the build pipeline
+- Deployment pipeline uses `$(System.DefaultWorkingDirectory)/.azure/main.bicep`
+- Supports both new deployments and incremental updates
 
 ## Configuration
 
@@ -35,16 +62,48 @@ You can choose between two approaches for your CI/CD pipelines:
 - `imageRepository`: Name of your container image repository
 - `containerRegistry`: Your ACR hostname
 
+**Trigger Configuration:**
+```yaml
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    exclude:
+      - .azurepipelines/deploy.yaml
+      - .azurepipelines/release.yaml
+      - .azure/**  # Infrastructure changes don't trigger builds
+```
+
 ### Deploy Pipeline (`deploy.yaml`)
 
 **Variables to configure:**
 - `azureServiceConnection`: Your Azure service connection name
-- `environmentName`: Target environment name (e.g., 'prod', 'staging')
+- `environmentName`: Target environment name (e.g., 'Production')
 - `subscriptionId`: Your Azure subscription ID
 - `location`: Azure region for deployment
+- `azureDevOpsOrgName`: Your Azure DevOps organization name
 
-**Pipeline Resource:**
-- Update the `source` field in the pipeline resource to match your build pipeline name
+**Trigger Configuration:**
+```yaml
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - .azurepipelines/deploy.yaml  # Self-triggering
+      - .azure/**                    # Infrastructure changes
+
+resources:
+  pipelines:
+  - pipeline: ci
+    source: 'ado-mcp-ci'            # Build pipeline name
+    trigger:
+      branches:
+        include:
+        - main
+```
 
 ### Prerequisites
 
@@ -54,81 +113,88 @@ You can choose between two approaches for your CI/CD pipelines:
 
 2. **Azure Resources:**
    - Azure Container Registry (configured in build pipeline)
-   - Azure Container Apps environment and app (deployed via Bicep templates)
+   - Appropriate RBAC permissions for subscription-level deployments
 
 3. **Environments:**
    - Create Azure DevOps environments for deployment approval gates
 
-## Usage
+## Deployment Flow Examples
 
-### Setting up Separate CI/CD Pipelines
+### Scenario 1: Code Change
+```
+Developer commits code changes
+↓
+Build pipeline triggers (builds new container image)
+↓
+Build pipeline completes successfully
+↓
+Deploy pipeline triggers automatically
+↓
+Downloads build metadata with new image tag
+↓
+Deploys infrastructure + updates container with new image
+```
 
-1. **Create the Build Pipeline:**
-   ```bash
-   # In Azure DevOps, create a new pipeline using build.yaml
-   # This will be your CI pipeline
-   ```
+### Scenario 2: Infrastructure Change
+```
+Developer modifies .azure/resources.bicep
+↓
+Deploy pipeline triggers directly (no build)
+↓
+No build metadata available
+↓
+Deploys infrastructure updates + keeps existing container image
+```
 
-2. **Create the Deploy Pipeline:**
-   ```bash
-   # In Azure DevOps, create a new pipeline using deploy.yaml
-   # Update the pipeline resource source name to match your build pipeline
-   ```
+### Scenario 3: Pipeline Configuration Change
+```
+Developer modifies .azurepipelines/deploy.yaml
+↓
+Deploy pipeline triggers to validate changes
+↓
+Tests pipeline changes with current infrastructure/container
+```
 
-3. **Configure Pipeline Dependencies:**
-   - The deploy pipeline will automatically trigger when the build pipeline completes successfully
-   - You can also trigger deployments manually
+## Bicep Infrastructure
 
-### Setting up Combined Pipeline
+### Key Features
+- **RBAC Authorization**: Key Vault uses modern RBAC instead of access policies
+- **Managed Identity**: Container apps use user-assigned managed identity
+- **Role Assignments**: Automatic RBAC role assignments for Key Vault and ACR access
+- **Subscription Scope**: Deployment creates resource group and all resources
 
-1. **Create a Single Pipeline:**
-   ```bash
-   # In Azure DevOps, create a new pipeline using release.yaml
-   # This handles both build and deployment in one pipeline
-   ```
-
-## Pipeline Artifacts
-
-The build pipeline creates the following artifacts:
-
-- **`source`**: Complete source code for the deployment
-- **`infra`**: Infrastructure Bicep templates
-- **`deployment-metadata`**: JSON file containing build information used by the deployment pipeline
-
-## Environment Configuration
-
-For production deployments, consider:
-
-1. **Environment Protection:**
-   - Add approval gates in Azure DevOps environments
-   - Configure deployment conditions and checks
-
-2. **Variable Groups:**
-   - Use Azure DevOps variable groups for environment-specific configuration
-   - Store sensitive values as secret variables
-
-3. **Service Connections:**
-   - Use separate service connections for different environments
-   - Follow principle of least privilege
+### Role Assignments
+- **Key Vault Secrets User**: Allows container app to read secrets
+- **Key Vault Secrets Officer**: Allows deployment process to create secrets
+- **ACR Pull**: Allows container app to pull images from registry
 
 ## Troubleshooting
 
 ### Common Issues
 
-1. **Service Connection Issues:**
-   - Verify service connection permissions
-   - Check service principal expiration
+1. **Build Pipeline Not Triggering Deployment:**
+   - Check pipeline resource configuration in `deploy.yaml`
+   - Verify the CI pipeline name matches `source: 'ado-mcp-ci'`
 
-2. **Container Registry Access:**
-   - Ensure the service connection has push permissions to ACR
-   - Verify ACR exists and is accessible
+2. **Infrastructure-Only Deployments Failing:**
+   - Ensure container app exists (infrastructure creates it)
+   - Check that fallback image `hireground.azurecr.io/adomcp:latest` exists
 
-3. **Container Apps Deployment:**
-   - Ensure infrastructure is deployed first (using `azd up` or Bicep)
-   - Check Azure CLI version compatibility
+3. **Permission Issues:**
+   - Verify service connection has Contributor access to subscription
+   - Check that managed identity has proper RBAC roles assigned
 
 ### Logs and Monitoring
 
-- Check pipeline logs in Azure DevOps
-- Monitor container app logs in Azure Portal
-- Use Application Insights for application monitoring
+- **Build logs**: Check Azure DevOps pipeline history for build issues
+- **Deployment logs**: Monitor ARM deployment progress in Azure portal
+- **Container logs**: Use Azure Container Apps logs for runtime issues
+- **Application Insights**: Monitor application performance and errors
+
+## Migration Notes
+
+If migrating from the old combined pipeline approach:
+1. Update pipeline references to use the new `build.yaml` and `deploy.yaml`
+2. Ensure environment and service connection configurations are correct
+3. Test both code changes and infrastructure changes to verify triggers work
+4. Consider removing the old `release.yaml` once new pipelines are stable

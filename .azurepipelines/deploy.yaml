@@ -21,24 +21,41 @@ resources:
         - main
 
 variables:
-  # Azure service connection for deployment
-  azureServiceConnection: 'Hire Ground Enterprise'  # Replace with your Azure service connection
+  - name: azureServiceConnection
+    value: 'Hire Ground Enterprise'
+    readonly: true
 
-  # Environment configuration - Update these values based on your deployment
-  environmentName: 'Production'  # Replace with your environment name
-  subscriptionId: '80188524-4199-4293-8e33-7ba33daa0f2a'  # Replace with your Azure subscription ID
-  location: 'eastus2'  # Replace with your deployment region
-  azureDevOpsOrgName: 'hireground'  # Replace with your Azure DevOps organization name
+  - name: environmentName
+    value: 'Production'
+    readonly: true
 
-  # Agent configuration
-  vmImageName: 'ubuntu-latest'
+  - name: subscriptionId
+    value: '80188524-4199-4293-8e33-7ba33daa0f2a'
+    readonly: true
+
+  - name: location
+    value: 'eastus2'
+    readonly: true
+
+  - name: azureDevOpsOrgName
+    value: 'hireground'
+    readonly: true
+
+  - name: vmImageName
+    value: 'ubuntu-latest'
+    readonly: true
 
 stages:
 - stage: Deploy
   displayName: Deploy to Azure Container Apps
   variables:
-    resourceGroupName: 'rg-devops'
-    containerAppName: 'ado-mcp-server-eus2'
+    - name: resourceGroupName
+      value: 'rg-devops'
+      readonly: true
+
+    - name: containerAppName
+      value: 'ado-mcp-server-eus2'
+      readonly: true
   jobs:
   - deployment: DeployToContainerApps
     displayName: Deploy to Azure Container Apps
@@ -60,25 +77,41 @@ stages:
               buildVersionToDownload: 'latest'
               artifactName: 'deployment-metadata'
               targetPath: '$(Pipeline.Workspace)/metadata'
+            continueOnError: true
 
           - task: PowerShell@2
             displayName: Load deployment metadata
             inputs:
               targetType: 'inline'
               script: |
-                $metadata = Get-Content "$(Pipeline.Workspace)/metadata/deployment-metadata.json" | ConvertFrom-Json
+                # Check if metadata file exists (from CI pipeline)
+                $metadataPath = "$(Pipeline.Workspace)/metadata/deployment-metadata.json"
 
-                Write-Host "##[section]Deployment Metadata:"
-                Write-Host "Build ID: $($metadata.buildId)"
-                Write-Host "Source Version: $($metadata.sourceVersion)"
-                Write-Host "Image Tag: $($metadata.imageTag)"
-                Write-Host "Container Registry: $($metadata.containerRegistry)"
-                Write-Host "Image Repository: $($metadata.imageRepository)"
-                Write-Host "Build Timestamp: $($metadata.timestamp)"
+                if (Test-Path $metadataPath) {
+                  Write-Host "##[section]Using metadata from CI pipeline"
+                  $metadata = Get-Content $metadataPath | ConvertFrom-Json
 
-                # Set variables for use in subsequent tasks
-                Write-Host "##vso[task.setvariable variable=newImageTag]$($metadata.containerRegistry)/$($metadata.imageRepository):$($metadata.imageTag)"
-                Write-Host "##vso[task.setvariable variable=buildId]$($metadata.buildId)"
+                  Write-Host "##[section]Deployment Metadata:"
+                  Write-Host "Build ID: $($metadata.buildId)"
+                  Write-Host "Source Version: $($metadata.sourceVersion)"
+                  Write-Host "Image Tag: $($metadata.imageTag)"
+                  Write-Host "Container Registry: $($metadata.containerRegistry)"
+                  Write-Host "Image Repository: $($metadata.imageRepository)"
+                  Write-Host "Build Timestamp: $($metadata.timestamp)"
+
+                  # Set variables for use in subsequent tasks
+                  Write-Host "##vso[task.setvariable variable=newImageTag]$($metadata.containerRegistry)/$($metadata.imageRepository):$($metadata.imageTag)"
+                  Write-Host "##vso[task.setvariable variable=buildId]$($metadata.buildId)"
+                  Write-Host "##vso[task.setvariable variable=hasNewBuild]true"
+                } else {
+                  Write-Host "##[warning]No metadata from CI pipeline found. This is likely an infrastructure-only deployment."
+                  Write-Host "##[section]Using latest container image from registry"
+
+                  # Use latest tag for infrastructure-only deployments
+                  Write-Host "##vso[task.setvariable variable=newImageTag]hireground.azurecr.io/adomcp:latest"
+                  Write-Host "##vso[task.setvariable variable=buildId]infrastructure-only"
+                  Write-Host "##vso[task.setvariable variable=hasNewBuild]false"
+                }
 
           - task: AzureResourceManagerTemplateDeployment@3
             displayName: Deploy infrastructure using Bicep
@@ -140,19 +173,26 @@ stages:
                 echo "Resource Group: $(resourceGroupName)"
                 echo "Container App: $(containerAppName)"
                 echo "New Image: $(newImageTag)"
+                echo "Has New Build: $(hasNewBuild)"
 
                 # Check if container app exists
                 if az containerapp show --name $(containerAppName) --resource-group $(resourceGroupName) --output none 2>/dev/null; then
-                  echo "##[command]Container App exists, updating with new image..."
 
-                  # Update existing container app
-                  az containerapp update \
-                    --name $(containerAppName) \
-                    --resource-group $(resourceGroupName) \
-                    --image $(newImageTag) \
-                    --output table
+                  # Only update container image if we have a new build
+                  if [ "$(hasNewBuild)" = "true" ]; then
+                    echo "##[command]Container App exists, updating with new image..."
 
-                  echo "##[section]Container App updated successfully!"
+                    # Update existing container app
+                    az containerapp update \
+                      --name $(containerAppName) \
+                      --resource-group $(resourceGroupName) \
+                      --image $(newImageTag) \
+                      --output table
+
+                    echo "##[section]Container App updated successfully!"                  else
+                    echo "##[section]Infrastructure-only deployment - Container App image not changed"
+                    echo "##[command]Container App exists and infrastructure is up to date"
+                  fi
                 else
                   echo "##[warning]Container App $(containerAppName) not found in resource group $(resourceGroupName)"
                   echo "Please ensure the infrastructure is deployed first using 'azd up' or Bicep templates"
@@ -232,22 +272,30 @@ stages:
         buildVersionToDownload: 'latest'
         artifactName: 'deployment-metadata'
         targetPath: '$(Pipeline.Workspace)/metadata'
+      continueOnError: true
 
     - task: PowerShell@2
       displayName: Send deployment notification
       inputs:
         targetType: 'inline'
         script: |
-          $metadata = Get-Content "$(Pipeline.Workspace)/metadata/deployment-metadata.json" | ConvertFrom-Json
+          $metadataPath = "$(Pipeline.Workspace)/metadata/deployment-metadata.json"
 
           Write-Host "##[section]🎉 Azure DevOps MCP Server Deployment Summary"
           Write-Host "##[command]Environment: $(environmentName)"
-          Write-Host "##[command]Build ID: $($metadata.buildId)"
-          Write-Host "##[command]Image Tag: $($metadata.imageTag)"
-          Write-Host "##[command]Container Registry: $($metadata.containerRegistry)"
           Write-Host "##[command]Resource Group: $(resourceGroupName)"
-          Write-Host "##[command]Source Version: $($metadata.sourceVersion)"
-          Write-Host "##[command]Build Timestamp: $($metadata.timestamp)"
+
+          if (Test-Path $metadataPath) {
+            $metadata = Get-Content $metadataPath | ConvertFrom-Json
+            Write-Host "##[command]Build ID: $($metadata.buildId)"
+            Write-Host "##[command]Image Tag: $($metadata.imageTag)"
+            Write-Host "##[command]Container Registry: $($metadata.containerRegistry)"
+            Write-Host "##[command]Source Version: $($metadata.sourceVersion)"
+            Write-Host "##[command]Build Timestamp: $($metadata.timestamp)"
+          } else {
+            Write-Host "##[command]Deployment Type: Infrastructure-only"
+            Write-Host "##[command]Container Image: Using latest from registry"
+          }
           Write-Host ""
           Write-Host "##[section]✅ Deployment completed successfully!"
           Write-Host "##[command]The Azure DevOps MCP Server is now running in Azure Container Apps"
