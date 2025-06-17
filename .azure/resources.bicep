@@ -35,20 +35,16 @@ resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
       name: 'standard'
     }
     tenantId: subscription().tenantId
-    accessPolicies: [
-      {
-        tenantId: subscription().tenantId
-        objectId: userAssignedIdentity.properties.principalId
-        permissions: {
-          secrets: [
-            'get'
-            'list'
-          ]
-        }
-      }
-    ]
     enabledForTemplateDeployment: true
-    enableRbacAuthorization: false
+    enableRbacAuthorization: true
+    enableSoftDelete: true
+    softDeleteRetentionInDays: 7
+    enablePurgeProtection: false
+    publicNetworkAccess: 'Enabled'
+    networkAcls: {
+      defaultAction: 'Allow'
+      bypass: 'AzureServices'
+    }
   }
 }
 
@@ -93,6 +89,9 @@ resource registrySecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
   properties: {
     value: containerRegistry.listCredentials().passwords[0].value
   }
+  dependsOn: [
+    keyVaultSecretsOfficerRole
+  ]
 }
 
 // Container App
@@ -178,11 +177,34 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
         minReplicas: 1
         maxReplicas: 3
       }
-    }
-  }
+    }  }
   dependsOn: [
     acrPullRole
+    keyVaultSecretsUserRole
   ]
+}
+
+// Key Vault RBAC role assignments
+// Grant the managed identity Key Vault Secrets User role for reading secrets
+resource keyVaultSecretsUserRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(keyVault.id, userAssignedIdentity.id, 'keyvaultsecretsuser')
+  scope: keyVault
+  properties: {
+    principalId: userAssignedIdentity.properties.principalId
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6') // Key Vault Secrets User
+    principalType: 'ServicePrincipal'
+  }
+}
+
+// Grant the managed identity Key Vault Secrets Officer role for managing secrets (needed for container registry secret)
+resource keyVaultSecretsOfficerRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(keyVault.id, userAssignedIdentity.id, 'keyvaultsecretsofficer')
+  scope: keyVault
+  properties: {
+    principalId: userAssignedIdentity.properties.principalId
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b86a8fe4-44ce-4948-aee5-eccb2c155cd7') // Key Vault Secrets Officer
+    principalType: 'ServicePrincipal'
+  }
 }
 
 // Outputs
