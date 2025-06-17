@@ -8,8 +8,9 @@ trigger:
       - main
   paths:
     exclude:
-      -  .azurepipelines/deploy.yaml
-      -  .azurepipelines/release.yaml
+      - .azurepipelines/deploy.yaml
+      - .azurepipelines/release.yaml
+      - .azure/**
 
 resources:
 - repo: self
@@ -62,14 +63,7 @@ stages:
     pool:
       vmImage: $(vmImageName)
     steps:
-    - checkout: self
-
-    - task: PublishPipelineArtifact@1
-      displayName: Publish infrastructure files
-      inputs:
-        targetPath: '$(System.DefaultWorkingDirectory)/.azure'
-        artifact: 'infra'
-        publishLocation: 'pipeline'
+    - checkout: none
 
     - task: PowerShell@2
       displayName: Create deployment metadata
