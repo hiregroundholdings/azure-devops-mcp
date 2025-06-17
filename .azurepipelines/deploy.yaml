@@ -122,7 +122,7 @@ stages:
               location: '$(location)'
               templateLocation: 'Linked artifact'
               csmFile: '$(System.DefaultWorkingDirectory)/.azure/main.bicep'
-              overrideParameters: |
+              overrideParameters: >-
                 -environmentName "$(environmentName)"
                 -location "$(location)"
                 -azureDevOpsOrgName "$(azureDevOpsOrgName)"
